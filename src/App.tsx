@@ -6,6 +6,8 @@ import { LeftPanel } from './components/LeftPanel';
 import { GraphCanvas } from './components/GraphCanvas';
 import { RightPanel } from './components/RightPanel';
 import { Neo4jSettingsModal } from './components/Neo4jSettingsModal';
+import { safeFetchJson, analyzeRepositoryInBrowser } from './services/clientAnalyzer';
+import { AlertTriangle, X } from 'lucide-react';
 import {
   GraphNode,
   GraphEdge,
@@ -299,35 +301,39 @@ export default function App() {
     }, 800);
 
     try {
-      const res = await fetch('/api/repositories/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: repoUrl }),
-      });
-
-      clearInterval(timer);
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to analyze repository');
+      let result: any;
+      try {
+        result = await safeFetchJson('/api/repositories/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: repoUrl }),
+        });
+      } catch (backendErr: any) {
+        console.warn('Backend analysis endpoint returned error, switching to direct GitHub parser:', backendErr.message);
+        setAnalysisMessage('Analyzing directly via GitHub API...');
+        result = await analyzeRepositoryInBrowser(repoUrl, (pct, msg) => {
+          setAnalysisProgress(pct);
+          setAnalysisMessage(msg);
+        });
       }
 
-      const result = await res.json();
+      clearInterval(timer);
       setAnalysisProgress(100);
       setAnalysisMessage('Knowledge graph created successfully!');
 
       setTimeout(() => {
         setIsAnalyzing(false);
         setCurrentRepo(result.repository);
+        if (result.nodes) setNodes(result.nodes);
+        if (result.edges) setEdges(result.edges);
         setCycles(result.cycles || []);
-        loadGraphForView(result.repository, 'dna');
+        if (result.repository) loadGraphForView(result.repository, 'dna');
         fetchNeo4jStatus();
       }, 500);
     } catch (err: any) {
       clearInterval(timer);
       setIsAnalyzing(false);
-      setAnalysisError(err.message);
-      alert(`Analysis failed: ${err.message}`);
+      setAnalysisError(err.message || 'Failed to analyze repository. Please verify the GitHub URL.');
     }
   };
 
@@ -336,16 +342,26 @@ export default function App() {
     setIsAnalyzing(true);
     setAnalysisProgress(30);
     setAnalysisMessage(`Loading verified graph for ${repoId}...`);
+    setAnalysisError(null);
 
     try {
-      const res = await fetch('/api/repositories/sample/load', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoId }),
-      });
-
-      if (!res.ok) throw new Error('Failed to load sample repository');
-      const data = await res.json();
+      let data: any;
+      try {
+        data = await safeFetchJson('/api/repositories/sample/load', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repoId }),
+        });
+      } catch (loadErr: any) {
+        console.warn('Backend sample load unavailable, loading directly:', loadErr.message);
+        data = await analyzeRepositoryInBrowser(
+          `https://github.com/${repoId}`,
+          (pct, msg) => {
+            setAnalysisProgress(pct);
+            setAnalysisMessage(msg);
+          }
+        );
+      }
 
       setAnalysisProgress(100);
       setTimeout(() => {
@@ -358,7 +374,7 @@ export default function App() {
       }, 300);
     } catch (err: any) {
       setIsAnalyzing(false);
-      alert(err.message);
+      setAnalysisError(err.message || 'Failed to load sample repository');
     }
   };
 
@@ -381,6 +397,22 @@ export default function App() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
       />
+
+      {/* In-UI Error Banner (replaces window.alert) */}
+      {analysisError && (
+        <div className="bg-rose-950/90 border-b border-rose-800 px-4 py-2 text-xs text-rose-200 flex items-center justify-between z-40 backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{analysisError}</span>
+          </div>
+          <button
+            onClick={() => setAnalysisError(null)}
+            className="p-1 hover:bg-rose-900/60 rounded text-rose-400 hover:text-rose-100 transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Main Content Area */}
       {!currentRepo ? (

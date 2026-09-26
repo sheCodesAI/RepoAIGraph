@@ -1,6 +1,6 @@
 import { parseGitHubUrl, isRelevantSourceFile, detectLanguage } from '../github.js';
 import { CodeParser } from '../parser.js';
-import { neo4jService } from '../neo4j.js';
+import { neo4jService, normalizeNeo4jUri } from '../neo4j.js';
 import { seedSampleRepository } from '../sampleData.js';
 
 async function runTests() {
@@ -17,6 +17,15 @@ async function runTests() {
       failed++;
     }
   }
+
+  // 0. Neo4j URI Normalization Tests
+  console.log('0. Testing Neo4j URI Normalization:');
+  assert(normalizeNeo4jUri('f30b0f09') === 'neo4j+s://f30b0f09.databases.neo4j.io', 'Normalizes 8-char Aura ID');
+  assert(normalizeNeo4jUri('f30b0f09.databases.neo4j.io') === 'neo4j+s://f30b0f09.databases.neo4j.io', 'Normalizes Aura domain');
+  assert(normalizeNeo4jUri('localhost:7687') === 'bolt://localhost:7687', 'Normalizes localhost:port to bolt://');
+  assert(normalizeNeo4jUri('neo4j+s://demo.databases.neo4j.io') === 'neo4j+s://demo.databases.neo4j.io', 'Preserves complete scheme');
+  assert(normalizeNeo4jUri('null') === '', 'Handles string "null" safely');
+  assert(normalizeNeo4jUri(undefined) === '', 'Handles undefined safely');
 
   // 1. GitHub URL Parsing Tests
   console.log('1. Testing GitHub URL Parsing:');

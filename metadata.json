@@ -2,5 +2,7 @@
   "name": "RepoGraph AI",
   "description": "Turn GitHub repositories into interactive Neo4j knowledge graphs. Analyze repository DNA, dependencies, cycles, architectures, APIs, and README connections.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

@@ -11,11 +11,40 @@ export interface Neo4jStatus {
   relationshipCount?: number;
 }
 
+export function normalizeNeo4jUri(rawUri?: string | null): string {
+  if (!rawUri || typeof rawUri !== 'string') return '';
+  const trimmed = rawUri.trim();
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return '';
+
+  // Already has scheme (bolt://, neo4j://, neo4j+s://, bolt+s://)
+  if (/^[a-zA-Z0-9+]+:\/\//.test(trimmed)) {
+    return trimmed;
+  }
+
+  // Aura instance ID format: 8-character hex (e.g. "f30b0f09")
+  if (/^[a-f0-9]{8}$/i.test(trimmed)) {
+    return `neo4j+s://${trimmed}.databases.neo4j.io`;
+  }
+
+  // Aura domain ending with .databases.neo4j.io
+  if (trimmed.endsWith('.databases.neo4j.io')) {
+    return `neo4j+s://${trimmed}`;
+  }
+
+  // Localhost or IP with port (e.g. localhost:7687 or 127.0.0.1:7687)
+  if (trimmed.includes(':')) {
+    return `bolt://${trimmed}`;
+  }
+
+  // Default fallback if host only
+  return `neo4j+s://${trimmed}.databases.neo4j.io`;
+}
+
 class Neo4jService {
   private driver: Driver | null = null;
   private isConnected = false;
   private connectionError: string | null = null;
-  private uri: string = process.env.NEO4J_URI || 'bolt://localhost:7687';
+  private uri: string = normalizeNeo4jUri(process.env.NEO4J_URI) || 'bolt://localhost:7687';
   private user: string = process.env.NEO4J_USERNAME || 'neo4j';
   private password: string = process.env.NEO4J_PASSWORD || '';
 
@@ -29,9 +58,13 @@ class Neo4jService {
 
   public async initDriver(customConfig?: { uri?: string; username?: string; password?: string }) {
     if (customConfig) {
-      if (customConfig.uri) this.uri = customConfig.uri;
-      if (customConfig.username) this.user = customConfig.username;
-      if (customConfig.password) this.password = customConfig.password;
+      if (customConfig.uri !== undefined) this.uri = normalizeNeo4jUri(customConfig.uri);
+      if (customConfig.username !== undefined) this.user = customConfig.username;
+      if (customConfig.password !== undefined) this.password = customConfig.password;
+    } else {
+      this.uri = normalizeNeo4jUri(process.env.NEO4J_URI);
+      this.user = process.env.NEO4J_USERNAME || 'neo4j';
+      this.password = process.env.NEO4J_PASSWORD || '';
     }
 
     if (this.driver) {
@@ -43,8 +76,8 @@ class Neo4jService {
       this.driver = null;
     }
 
-    // Only attempt real connection if URI and credentials exist
-    if (this.uri && this.password) {
+    // Only attempt real connection if normalized URI and credentials exist and valid scheme
+    if (this.uri && this.password && /^[a-zA-Z0-9+]+:\/\//.test(this.uri)) {
       try {
         this.driver = neo4j.driver(this.uri, neo4j.auth.basic(this.user, this.password), {
           connectionTimeout: 5000,
@@ -65,7 +98,9 @@ class Neo4jService {
       }
     } else {
       this.isConnected = false;
-      this.connectionError = 'NEO4J_PASSWORD not configured. Running on in-memory Neo4j graph engine.';
+      this.connectionError = !this.uri
+        ? 'NEO4J_URI not configured or invalid. Running on in-memory Neo4j graph engine.'
+        : 'NEO4J_PASSWORD not configured. Running on in-memory Neo4j graph engine.';
       console.log(`[Neo4j] ${this.connectionError}`);
       return { success: false, message: this.connectionError };
     }
